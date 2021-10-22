@@ -18,18 +18,10 @@ def compute_norm(x, axis, keepdims):
 
 
 def unitwise_norm(x):
-    if len(x.get_shape()) <= 1:  # Scalars and vectors
-        axis = None
-        keepdims = False
-    elif len(x.get_shape()) in [2, 3]:  # Linear layers of shape IO or multihead linear
-        axis = 0
-        keepdims = True
-    elif len(x.get_shape()) == 4:  # Conv kernels of shape HWIO
-        axis = [0, 1, 2]
-        keepdims = True
-    else:
-        raise ValueError(f"Got a parameter with shape not in [1, 2, 4]! {x}")
-    return compute_norm(x, axis, keepdims)
+    rank = tf.rank(x)
+    keepdims = rank >= 1
+    axis = tf.cond(rank >= 4, lambda: [0, 1, 2], lambda: 0)
+    return compute_norm(x, keepdims=keepdims, axis=axis)
 
 
 def adaptive_clip_gradients(parameters, gradients, clip_factor=0.01, eps=1e-3):
@@ -38,7 +30,9 @@ def adaptive_clip_gradients(parameters, gradients, clip_factor=0.01, eps=1e-3):
         p_norm = unitwise_norm(params)
         max_norm = tf.math.maximum(p_norm, eps) * clip_factor
         grad_norm = unitwise_norm(grads)
-        clipped_grad = grads * (max_norm / tf.math.maximum(grad_norm, 1e-6))
+        clipped_grad = grads * tf.math.divide_no_nan(
+            max_norm, tf.math.maximum(grad_norm, eps)
+        )
         new_grad = tf.where(grad_norm < max_norm, grads, clipped_grad)
         new_grads.append(new_grad)
     return new_grads
